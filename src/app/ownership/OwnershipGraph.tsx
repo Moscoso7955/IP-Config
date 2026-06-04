@@ -15,6 +15,7 @@ import {
   type NodeChange,
   type EdgeChange,
   type NodePositionChange,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { OwnershipNode, type OwnershipNodeData } from "./OwnershipNode";
@@ -29,6 +30,10 @@ import {
 } from "./actions";
 
 const nodeTypes = { ownership: OwnershipNode };
+
+// Width of the details pane (must match EntityDetailsPane). Used to offset
+// auto-panning so a focused node lands left of the pane, not behind it.
+const PANE_WIDTH = 360;
 
 export function OwnershipGraph({
   initialEntities,
@@ -55,6 +60,16 @@ export function OwnershipGraph({
   }, [initialEdges]);
 
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const rfRef = useRef<ReactFlowInstance | null>(null);
+
+  // Center the viewport on a graph point, shifted right by half the pane width
+  // so the focused node sits in the visible area to the left of the pane.
+  const focusPoint = useCallback((x: number, y: number) => {
+    const inst = rfRef.current;
+    if (!inst) return;
+    const zoom = inst.getZoom();
+    inst.setCenter(x + PANE_WIDTH / 2 / zoom, y, { zoom, duration: 400 });
+  }, []);
 
   // Client-side copy of entities so the pane can find a row immediately after
   // adding, without waiting for revalidatePath to round-trip.
@@ -247,8 +262,11 @@ export function OwnershipGraph({
   const handleAddChild = useCallback(
     async (parentId: string) => {
       const parent = entities.find((e) => e.id === parentId);
-      const x = (parent?.position_x ?? 100) + 40;
-      const y = (parent?.position_y ?? 100) + 160;
+      // Fan multiple children out horizontally so they don't stack on top of
+      // each other; place them a row below the parent.
+      const siblingCount = edges.filter((e) => e.source === parentId).length;
+      const x = (parent?.position_x ?? 100) + siblingCount * 80;
+      const y = (parent?.position_y ?? 100) + 170;
 
       const res = await addEntity({ name: "New box", position_x: x, position_y: y });
       if (res.error || !res.id) {
@@ -296,8 +314,9 @@ export function OwnershipGraph({
         );
       }
       setEditingEntityId(childId);
+      focusPoint(x, y);
     },
-    [entities],
+    [entities, edges, focusPoint],
   );
 
   function handleEntityUpdated(updated: DbEntity) {
@@ -339,6 +358,7 @@ export function OwnershipGraph({
           onConnect={onConnect}
           onEdgeClick={(_e, edge) => handleEdgeClick(edge)}
           onPaneClick={() => setEditingEntityId(null)}
+          onInit={(inst) => { rfRef.current = inst; }}
           nodeTypes={nodeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
