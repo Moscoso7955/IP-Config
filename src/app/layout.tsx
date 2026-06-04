@@ -12,9 +12,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const TITLE = "Owner Vis — Ownership & IP map";
+const DESCRIPTION =
+  "Map who owns what. Visualize ownership, IP, and products as an interactive graph — people, entities, products, and patents, with ownership percentages.";
+
 export const metadata: Metadata = {
-  title: "Owner Vis",
-  description: "Visualize an ownership structure as a graph.",
+  metadataBase: new URL("https://owner-vis.vercel.app"),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    url: "/",
+    siteName: "Owner Vis",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({
