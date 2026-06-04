@@ -6,6 +6,21 @@ import { MAX_LINKS, type DbEntity, type EntityLink } from "./types";
 
 const DEFAULT_COLOR = "#3b82f6";
 
+// Make a user-entered URL safe to open. Adds https:// when no scheme is given,
+// and only allows http/https links.
+function toHref(url: string): string | null {
+  const u = url.trim();
+  if (!u) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? u : `https://${u}`;
+  try {
+    const parsed = new URL(withScheme);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
 export function EntityDetailsPane({
   entity,
   onClose,
@@ -191,32 +206,55 @@ export function EntityDetailsPane({
             {links.length === 0 && (
               <p className="text-xs text-gray-400">No links yet.</p>
             )}
-            {links.map((l, i) => (
-              <div key={i} className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={l.label}
-                  onChange={(e) => setLink(i, { label: e.target.value })}
-                  placeholder="Label"
-                  className="w-1/3 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                />
-                <input
-                  type="url"
-                  value={l.url}
-                  onChange={(e) => setLink(i, { url: e.target.value })}
-                  placeholder="https://…"
-                  className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeLink(i)}
-                  className="text-gray-400 hover:text-red-600 text-lg leading-none px-1"
-                  aria-label="Remove link"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {links.map((l, i) => {
+              const href = toHref(l.url);
+              return (
+                <div key={i} className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={l.label}
+                    onChange={(e) => setLink(i, { label: e.target.value })}
+                    placeholder="Label"
+                    className="w-1/3 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    type="url"
+                    value={l.url}
+                    onChange={(e) => setLink(i, { url: e.target.value })}
+                    placeholder="https://…"
+                    className="flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                  {href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gray-400 hover:text-blue-600 text-base leading-none px-1"
+                      aria-label="Open link in new tab"
+                      title={`Open ${href}`}
+                    >
+                      ↗
+                    </a>
+                  ) : (
+                    <span
+                      className="text-gray-200 text-base leading-none px-1 cursor-default"
+                      title="Enter a valid URL to open"
+                      aria-hidden="true"
+                    >
+                      ↗
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeLink(i)}
+                    className="text-gray-400 hover:text-red-600 text-lg leading-none px-1"
+                    aria-label="Remove link"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
