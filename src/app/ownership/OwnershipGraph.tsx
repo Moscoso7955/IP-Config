@@ -18,7 +18,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { OwnershipNode, type OwnershipNodeData } from "./OwnershipNode";
-import { EntityEditModal } from "./EntityEditModal";
+import { EntityDetailsPane } from "./EntityDetailsPane";
+import type { DbEntity, DbEdge } from "./types";
 import {
   addEntity,
   addEdge as addEdgeAction,
@@ -28,22 +29,6 @@ import {
 } from "./actions";
 
 const nodeTypes = { ownership: OwnershipNode };
-
-type DbEntity = {
-  id: string;
-  name: string;
-  entity_type: "individual" | "company";
-  email: string | null;
-  position_x: number | null;
-  position_y: number | null;
-};
-
-type DbEdge = {
-  id: string;
-  parent_id: string;
-  child_id: string;
-  percentage: number;
-};
 
 export function OwnershipGraph({
   initialEntities,
@@ -71,8 +56,8 @@ export function OwnershipGraph({
 
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
-  // Client-side copy of entities so the modal can find a row immediately
-  // after adding, without waiting for revalidatePath to round-trip.
+  // Client-side copy of entities so the pane can find a row immediately after
+  // adding, without waiting for revalidatePath to round-trip.
   const [entities, setEntities] = useState<DbEntity[]>(initialEntities);
 
   const toRFNodes = useCallback(
@@ -86,8 +71,10 @@ export function OwnershipGraph({
         },
         data: {
           name: e.name,
-          entity_type: e.entity_type,
-          email: e.email,
+          category: e.category,
+          subcategory: e.subcategory,
+          color: e.color,
+          link_count: e.links.length,
           inbound_total_pct: inboundCounts.get(e.id)
             ? inboundTotals.get(e.id) ?? 0
             : null,
@@ -230,16 +217,11 @@ export function OwnershipGraph({
     );
   }
 
-  async function handleAdd(entity_type: "individual" | "company") {
-    const name = entity_type === "individual" ? "New person" : "New entity";
+  async function handleAdd() {
+    const name = "New box";
     const x = 100 + Math.random() * 400;
     const y = 100 + Math.random() * 200;
-    const result = await addEntity({
-      name,
-      entity_type,
-      position_x: x,
-      position_y: y,
-    });
+    const result = await addEntity({ name, position_x: x, position_y: y });
     if (result.error || !result.id) {
       alert(result.error ?? "Failed to add");
       return;
@@ -247,8 +229,12 @@ export function OwnershipGraph({
     const newEntity: DbEntity = {
       id: result.id,
       name,
-      entity_type,
+      category: null,
+      subcategory: null,
       email: null,
+      notes: null,
+      color: null,
+      links: [],
       position_x: x,
       position_y: y,
     };
@@ -265,30 +251,28 @@ export function OwnershipGraph({
     setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id));
   }
 
+  const editingEntity = editingEntityId
+    ? entities.find((e) => e.id === editingEntityId) ?? null
+    : null;
+
   return (
     <div className="flex flex-col h-[calc(100vh-90px)]">
       <div className="flex items-center gap-2 p-3 border-b border-gray-200 bg-white">
         <button
           type="button"
-          onClick={() => handleAdd("individual")}
+          onClick={handleAdd}
           className="rounded-md bg-black text-white px-3 py-1.5 text-sm hover:bg-gray-800"
         >
-          + Person
-        </button>
-        <button
-          type="button"
-          onClick={() => handleAdd("company")}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-        >
-          + Entity
+          + Add box
         </button>
         <span className="ml-auto text-xs text-gray-500">
-          Drag from the bottom of a node to another node&rsquo;s top to create an
-          ownership edge. Click any edge to edit its %.
+          Click a box to edit it. Drag from the bottom of a box to another
+          box&rsquo;s top to create an ownership edge; click any edge to edit
+          its %.
         </span>
       </div>
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 relative">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -296,6 +280,7 @@ export function OwnershipGraph({
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onEdgeClick={(_e, edge) => handleEdgeClick(edge)}
+          onPaneClick={() => setEditingEntityId(null)}
           nodeTypes={nodeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
@@ -305,23 +290,17 @@ export function OwnershipGraph({
           <Controls />
           <MiniMap pannable zoomable />
         </ReactFlow>
-      </div>
 
-      {editingEntityId && (() => {
-        const entity = entities.find((e) => e.id === editingEntityId);
-        if (!entity) {
-          setEditingEntityId(null);
-          return null;
-        }
-        return (
-          <EntityEditModal
-            entity={entity}
+        {editingEntity && (
+          <EntityDetailsPane
+            key={editingEntity.id}
+            entity={editingEntity}
             onClose={() => setEditingEntityId(null)}
             onUpdated={handleEntityUpdated}
             onDeleted={handleEntityDeleted}
           />
-        );
-      })()}
+        )}
+      </div>
     </div>
   );
 }
