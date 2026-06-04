@@ -1,6 +1,12 @@
 import { createClient } from "../../lib/supabase";
 import { OwnershipGraph } from "./OwnershipGraph";
 
+// This page reads live ownership data from Supabase, so it must render per
+// request rather than be prerendered at build time. Without this, `next build`
+// tries to statically generate /ownership and fails when the Supabase env vars
+// aren't present at build time (e.g. in CI / on a fresh deploy).
+export const dynamic = "force-dynamic";
+
 export default async function OwnershipPage() {
   const supabase = createClient();
 
