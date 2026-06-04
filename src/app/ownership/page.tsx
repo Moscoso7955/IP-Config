@@ -1,24 +1,43 @@
-import { createClient } from "../../lib/supabase";
+import { getDb } from "../../lib/db";
 import { OwnershipGraph } from "./OwnershipGraph";
 
-// This page reads live ownership data from Supabase, so it must render per
-// request rather than be prerendered at build time. Without this, `next build`
-// tries to statically generate /ownership and fails when the Supabase env vars
-// aren't present at build time (e.g. in CI / on a fresh deploy).
+type DbEntity = {
+  id: string;
+  name: string;
+  entity_type: "individual" | "company";
+  email: string | null;
+  position_x: number | null;
+  position_y: number | null;
+};
+
+type DbEdge = {
+  id: string;
+  parent_id: string;
+  child_id: string;
+  percentage: number;
+};
+
+// This page reads from the local SQLite database, so it must render per request
+// rather than be prerendered at build time. Without this, `next build` would try
+// to statically generate /ownership and touch the filesystem during the build.
 export const dynamic = "force-dynamic";
 
 export default async function OwnershipPage() {
-  const supabase = createClient();
+  const db = getDb();
 
-  const [{ data: entities }, { data: edges }] = await Promise.all([
-    supabase
-      .from("ownership_entities")
-      .select("id, name, entity_type, email, position_x, position_y")
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("ownership_edges")
-      .select("id, parent_id, child_id, percentage"),
-  ]);
+  // rowid preserves insertion order (the order rows were added).
+  const entities = db
+    .prepare(
+      `select id, name, entity_type, email, position_x, position_y
+       from ownership_entities order by rowid asc`,
+    )
+    .all() as DbEntity[];
+
+  const edges = db
+    .prepare(
+      "select id, parent_id, child_id, percentage from ownership_edges",
+    )
+    .all() as DbEdge[];
 
   return (
     <main className="flex-1 flex flex-col">
@@ -30,10 +49,7 @@ export default async function OwnershipPage() {
         </p>
       </div>
 
-      <OwnershipGraph
-        initialEntities={entities ?? []}
-        initialEdges={edges ?? []}
-      />
+      <OwnershipGraph initialEntities={entities} initialEdges={edges} />
     </main>
   );
 }
