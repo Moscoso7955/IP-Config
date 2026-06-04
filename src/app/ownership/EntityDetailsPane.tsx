@@ -11,11 +11,13 @@ export function EntityDetailsPane({
   onClose,
   onUpdated,
   onDeleted,
+  onAddChild,
 }: {
   entity: DbEntity;
   onClose: () => void;
   onUpdated: (entity: DbEntity) => void;
   onDeleted: (id: string) => void;
+  onAddChild: (parentId: string) => Promise<void>;
 }) {
   const [name, setName] = useState(entity.name);
   const [category, setCategory] = useState(entity.category ?? "");
@@ -42,7 +44,9 @@ export function EntityDetailsPane({
     setSaved(false);
   }
 
-  function handleSave() {
+  // Persist the current pane fields. Returns true on success so callers can
+  // chain follow-up actions (e.g. adding a child) without losing edits.
+  async function persist(): Promise<boolean> {
     setError(null);
     const cleanLinks = links
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
@@ -56,14 +60,27 @@ export function EntityDetailsPane({
       color,
       links: cleanLinks,
     };
+    const r = await updateEntity(entity.id, patch);
+    if (r.error) {
+      setError(r.error);
+      return false;
+    }
+    onUpdated({ ...entity, ...patch });
+    return true;
+  }
+
+  function handleSave() {
     startTransition(async () => {
-      const r = await updateEntity(entity.id, patch);
-      if (r.error) {
-        setError(r.error);
-        return;
-      }
-      onUpdated({ ...entity, ...patch });
-      setSaved(true);
+      if (await persist()) setSaved(true);
+    });
+  }
+
+  // Save this box, then create a new box already connected below it and switch
+  // the pane to the new child.
+  function handleAddChild() {
+    startTransition(async () => {
+      if (!(await persist())) return;
+      await onAddChild(entity.id);
     });
   }
 
@@ -230,6 +247,15 @@ export function EntityDetailsPane({
         </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <button
+          type="button"
+          onClick={handleAddChild}
+          disabled={pending}
+          className="w-full rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          + Add child (connected below)
+        </button>
       </div>
 
       <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">

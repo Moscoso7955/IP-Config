@@ -242,6 +242,64 @@ export function OwnershipGraph({
     setEditingEntityId(result.id);
   }
 
+  // Create a new box already connected as a child (100% ownership by default —
+  // click the edge to change it) and switch the pane to it.
+  const handleAddChild = useCallback(
+    async (parentId: string) => {
+      const parent = entities.find((e) => e.id === parentId);
+      const x = (parent?.position_x ?? 100) + 40;
+      const y = (parent?.position_y ?? 100) + 160;
+
+      const res = await addEntity({ name: "New box", position_x: x, position_y: y });
+      if (res.error || !res.id) {
+        alert(res.error ?? "Failed to add child");
+        return;
+      }
+      const childId = res.id;
+      const child: DbEntity = {
+        id: childId,
+        name: "New box",
+        category: null,
+        subcategory: null,
+        email: null,
+        notes: null,
+        color: null,
+        links: [],
+        position_x: x,
+        position_y: y,
+      };
+      setEntities((prev) => [...prev, child]);
+
+      const edgeRes = await addEdgeAction({
+        parent_id: parentId,
+        child_id: childId,
+        percentage: 100,
+      });
+      if (edgeRes.error || !edgeRes.id) {
+        alert(edgeRes.error ?? "Created the box but couldn't connect it.");
+      } else {
+        setEdges((eds) =>
+          rfAddEdge(
+            {
+              id: edgeRes.id!,
+              source: parentId,
+              target: childId,
+              label: "100%",
+              labelStyle: { fontWeight: 600, fontSize: 12, fill: "#374151" },
+              labelBgStyle: { fill: "#ffffff" },
+              labelBgPadding: [4, 2],
+              labelBgBorderRadius: 4,
+              style: { stroke: "#6b7280", strokeWidth: 2 },
+            },
+            eds,
+          ),
+        );
+      }
+      setEditingEntityId(childId);
+    },
+    [entities],
+  );
+
   function handleEntityUpdated(updated: DbEntity) {
     setEntities((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
   }
@@ -298,6 +356,7 @@ export function OwnershipGraph({
             onClose={() => setEditingEntityId(null)}
             onUpdated={handleEntityUpdated}
             onDeleted={handleEntityDeleted}
+            onAddChild={handleAddChild}
           />
         )}
       </div>
