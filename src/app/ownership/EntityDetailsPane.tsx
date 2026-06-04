@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { updateEntity, deleteEntity } from "./actions";
+import { useState } from "react";
+import { updateEntity, deleteEntity } from "./store";
 import { MAX_LINKS, type DbEntity, type EntityLink } from "./types";
 
 const DEFAULT_COLOR = "#3b82f6";
@@ -17,7 +17,7 @@ export function EntityDetailsPane({
   onClose: () => void;
   onUpdated: (entity: DbEntity) => void;
   onDeleted: (id: string) => void;
-  onAddChild: (parentId: string) => Promise<void>;
+  onAddChild: (parentId: string) => void;
 }) {
   const [name, setName] = useState(entity.name);
   const [category, setCategory] = useState(entity.category ?? "");
@@ -28,7 +28,6 @@ export function EntityDetailsPane({
   const [links, setLinks] = useState<EntityLink[]>(entity.links);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [pending, startTransition] = useTransition();
 
   function setLink(i: number, patch: Partial<EntityLink>) {
     setLinks((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -44,9 +43,9 @@ export function EntityDetailsPane({
     setSaved(false);
   }
 
-  // Persist the current pane fields. Returns true on success so callers can
-  // chain follow-up actions (e.g. adding a child) without losing edits.
-  async function persist(): Promise<boolean> {
+  // Persist the current pane fields to the browser store, then notify the
+  // parent so the canvas reflects the change.
+  function persist() {
     setError(null);
     const cleanLinks = links
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
@@ -60,41 +59,27 @@ export function EntityDetailsPane({
       color,
       links: cleanLinks,
     };
-    const r = await updateEntity(entity.id, patch);
-    if (r.error) {
-      setError(r.error);
-      return false;
-    }
+    updateEntity(entity.id, patch);
     onUpdated({ ...entity, ...patch });
-    return true;
   }
 
   function handleSave() {
-    startTransition(async () => {
-      if (await persist()) setSaved(true);
-    });
+    persist();
+    setSaved(true);
   }
 
   // Save this box, then create a new box already connected below it and switch
   // the pane to the new child.
   function handleAddChild() {
-    startTransition(async () => {
-      if (!(await persist())) return;
-      await onAddChild(entity.id);
-    });
+    persist();
+    onAddChild(entity.id);
   }
 
   function handleDelete() {
     if (!confirm("Delete this box? All connected edges will also be removed.")) return;
-    startTransition(async () => {
-      const r = await deleteEntity(entity.id);
-      if (r.error) {
-        setError(r.error);
-        return;
-      }
-      onDeleted(entity.id);
-      onClose();
-    });
+    deleteEntity(entity.id);
+    onDeleted(entity.id);
+    onClose();
   }
 
   const fieldClass =
@@ -251,8 +236,7 @@ export function EntityDetailsPane({
         <button
           type="button"
           onClick={handleAddChild}
-          disabled={pending}
-          className="w-full rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="w-full rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
         >
           + Add child (connected below)
         </button>
@@ -262,8 +246,7 @@ export function EntityDetailsPane({
         <button
           type="button"
           onClick={handleDelete}
-          disabled={pending}
-          className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+          className="text-sm text-red-600 hover:text-red-800"
         >
           Delete
         </button>
@@ -272,10 +255,9 @@ export function EntityDetailsPane({
           <button
             type="button"
             onClick={handleSave}
-            disabled={pending}
-            className="rounded-md bg-black text-white px-4 py-2 text-sm hover:bg-gray-800 disabled:opacity-50"
+            className="rounded-md bg-black text-white px-4 py-2 text-sm hover:bg-gray-800"
           >
-            {pending ? "Saving…" : "Save"}
+            Save
           </button>
         </div>
       </div>

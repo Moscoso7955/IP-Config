@@ -8,7 +8,6 @@ import {
   MiniMap,
   applyNodeChanges,
   applyEdgeChanges,
-  addEdge as rfAddEdge,
   type Node,
   type Edge,
   type Connection,
@@ -21,13 +20,7 @@ import "@xyflow/react/dist/style.css";
 import { OwnershipNode, type OwnershipNodeData } from "./OwnershipNode";
 import { EntityDetailsPane } from "./EntityDetailsPane";
 import type { DbEntity, DbEdge } from "./types";
-import {
-  addEntity,
-  addEdge as addEdgeAction,
-  updateEdge,
-  deleteEdge,
-  updateEntityPositions,
-} from "./actions";
+import * as store from "./store";
 
 const nodeTypes = { ownership: OwnershipNode };
 
@@ -35,49 +28,47 @@ const nodeTypes = { ownership: OwnershipNode };
 // auto-panning so a focused node lands left of the pane, not behind it.
 const PANE_WIDTH = 360;
 
-export function OwnershipGraph({
-  initialEntities,
-  initialEdges,
-}: {
-  initialEntities: DbEntity[];
-  initialEdges: DbEdge[];
-}) {
-  // For each child entity, sum the percentages of its incoming edges.
-  const inboundTotals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of initialEdges) {
-      m.set(e.child_id, (m.get(e.child_id) ?? 0) + Number(e.percentage));
-    }
-    return m;
-  }, [initialEdges]);
+const EDGE_STYLE = {
+  labelStyle: { fontWeight: 600, fontSize: 12, fill: "#374151" },
+  labelBgStyle: { fill: "#ffffff" },
+  labelBgPadding: [4, 2] as [number, number],
+  labelBgBorderRadius: 4,
+  style: { stroke: "#6b7280", strokeWidth: 2 },
+};
 
-  const inboundCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of initialEdges) {
-      m.set(e.child_id, (m.get(e.child_id) ?? 0) + 1);
-    }
-    return m;
-  }, [initialEdges]);
+function pctLabel(p: number) {
+  return `${Number(p).toFixed(Number(p) % 1 === 0 ? 0 : 2)}%`;
+}
 
+export function OwnershipGraph() {
+  const [entities, setEntities] = useState<DbEntity[]>([]);
+  const [dbEdges, setDbEdges] = useState<DbEdge[]>([]);
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
   const rfRef = useRef<ReactFlowInstance | null>(null);
 
-  // Center the viewport on a graph point, shifted right by half the pane width
-  // so the focused node sits in the visible area to the left of the pane.
-  const focusPoint = useCallback((x: number, y: number) => {
-    const inst = rfRef.current;
-    if (!inst) return;
-    const zoom = inst.getZoom();
-    inst.setCenter(x + PANE_WIDTH / 2 / zoom, y, { zoom, duration: 400 });
+  // localStorage is browser-only, so load after mount.
+  useEffect(() => {
+    const g = store.loadGraph();
+    setEntities(g.entities);
+    setDbEdges(g.edges);
   }, []);
 
-  // Client-side copy of entities so the pane can find a row immediately after
-  // adding, without waiting for revalidatePath to round-trip.
-  const [entities, setEntities] = useState<DbEntity[]>(initialEntities);
+  // For each child entity, sum the percentages / count of its incoming edges.
+  const inboundTotals = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of dbEdges) m.set(e.child_id, (m.get(e.child_id) ?? 0) + Number(e.percentage));
+    return m;
+  }, [dbEdges]);
+
+  const inboundCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of dbEdges) m.set(e.child_id, (m.get(e.child_id) ?? 0) + 1);
+    return m;
+  }, [dbEdges]);
 
   const toRFNodes = useCallback(
-    (entities: DbEntity[]): Node[] =>
-      entities.map((e) => ({
+    (list: DbEntity[]): Node[] =>
+      list.map((e) => ({
         id: e.id,
         type: "ownership",
         position: {
@@ -90,9 +81,7 @@ export function OwnershipGraph({
           subcategory: e.subcategory,
           color: e.color,
           link_count: e.links.length,
-          inbound_total_pct: inboundCounts.get(e.id)
-            ? inboundTotals.get(e.id) ?? 0
-            : null,
+          inbound_total_pct: inboundCounts.get(e.id) ? inboundTotals.get(e.id) ?? 0 : null,
           is_root: !inboundCounts.get(e.id),
           onClick: () => setEditingEntityId(e.id),
         } satisfies OwnershipNodeData,
@@ -101,53 +90,46 @@ export function OwnershipGraph({
   );
 
   const toRFEdges = useCallback(
-    (edges: DbEdge[]): Edge[] =>
-      edges.map((e) => ({
+    (list: DbEdge[]): Edge[] =>
+      list.map((e) => ({
         id: e.id,
         source: e.parent_id,
         target: e.child_id,
-        label: `${Number(e.percentage).toFixed(Number(e.percentage) % 1 === 0 ? 0 : 2)}%`,
-        labelStyle: { fontWeight: 600, fontSize: 12, fill: "#374151" },
-        labelBgStyle: { fill: "#ffffff" },
-        labelBgPadding: [4, 2],
-        labelBgBorderRadius: 4,
-        style: { stroke: "#6b7280", strokeWidth: 2 },
+        label: pctLabel(e.percentage),
+        ...EDGE_STYLE,
       })),
     [],
   );
 
-  const [nodes, setNodes] = useState<Node[]>(() => toRFNodes(entities));
-  const [edges, setEdges] = useState<Edge[]>(() => toRFEdges(initialEdges));
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
 
   useEffect(() => {
     setNodes(toRFNodes(entities));
   }, [entities, toRFNodes]);
 
   useEffect(() => {
-    setEdges(toRFEdges(initialEdges));
-  }, [initialEdges, toRFEdges]);
+    setEdges(toRFEdges(dbEdges));
+  }, [dbEdges, toRFEdges]);
 
-  // Reconcile with server pushes — new server entities win; preserve any
-  // client-only optimistic adds we haven't seen on the server yet.
-  useEffect(() => {
-    setEntities((prev) => {
-      const serverIds = new Set(initialEntities.map((e) => e.id));
-      const clientOnly = prev.filter((e) => !serverIds.has(e.id));
-      return [...initialEntities, ...clientOnly];
-    });
-  }, [initialEntities]);
-
-  // Debounce position saves so we don't fire a request per drag pixel.
+  // Debounce position saves so we don't write on every drag pixel.
   const positionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPositions = useRef<Map<string, { x: number; y: number }>>(new Map());
 
-  const flushPositionSaves = useCallback(async () => {
+  const flushPositionSaves = useCallback(() => {
     if (pendingPositions.current.size === 0) return;
     const positions = Array.from(pendingPositions.current.entries()).map(
       ([id, p]) => ({ id, x: p.x, y: p.y }),
     );
     pendingPositions.current.clear();
-    await updateEntityPositions(positions);
+    store.updateEntityPositions(positions);
+    const map = new Map(positions.map((p) => [p.id, p]));
+    setEntities((prev) =>
+      prev.map((e) => {
+        const p = map.get(e.id);
+        return p ? { ...e, position_x: p.x, position_y: p.y } : e;
+      }),
+    );
   }, []);
 
   const onNodesChange = useCallback(
@@ -169,55 +151,36 @@ export function OwnershipGraph({
     setEdges((eds) => applyEdgeChanges(changes, eds));
   }, []);
 
-  const onConnect = useCallback(
-    async (params: Connection) => {
-      if (!params.source || !params.target) return;
-      const pctStr = window.prompt("Ownership percentage (0–100):", "100");
-      if (pctStr === null) return;
-      const pct = parseFloat(pctStr);
-      if (Number.isNaN(pct) || pct <= 0 || pct > 100) {
-        alert("Percentage must be a number between 0 and 100.");
-        return;
-      }
-      const result = await addEdgeAction({
-        parent_id: params.source,
-        child_id: params.target,
-        percentage: pct,
-      });
-      if (result.error) {
-        alert(result.error);
-        return;
-      }
-      setEdges((eds) =>
-        rfAddEdge(
-          {
-            id: result.id!,
-            source: params.source!,
-            target: params.target!,
-            label: `${pct}%`,
-            labelStyle: { fontWeight: 600, fontSize: 12, fill: "#374151" },
-            labelBgStyle: { fill: "#ffffff" },
-            labelBgPadding: [4, 2],
-            labelBgBorderRadius: 4,
-            style: { stroke: "#6b7280", strokeWidth: 2 },
-          },
-          eds,
-        ),
-      );
-    },
-    [],
-  );
+  const onConnect = useCallback((params: Connection) => {
+    if (!params.source || !params.target) return;
+    const pctStr = window.prompt("Ownership percentage (0–100):", "100");
+    if (pctStr === null) return;
+    const pct = parseFloat(pctStr);
+    if (Number.isNaN(pct) || pct <= 0 || pct > 100) {
+      alert("Percentage must be a number between 0 and 100.");
+      return;
+    }
+    const res = store.addEdge({
+      parent_id: params.source,
+      child_id: params.target,
+      percentage: pct,
+    });
+    if (!res.ok) {
+      alert(res.error);
+      return;
+    }
+    setDbEdges((prev) => [...prev, res.edge]);
+  }, []);
 
-  async function handleEdgeClick(edge: Edge) {
+  function handleEdgeClick(edge: Edge) {
     const action = window.prompt(
       `Edit edge: enter new % (0–100), or "delete" to remove. Currently: ${edge.label}`,
       String(edge.label).replace("%", ""),
     );
     if (action === null) return;
     if (action.trim().toLowerCase() === "delete") {
-      const r = await deleteEdge(edge.id);
-      if (r.error) return alert(r.error);
-      setEdges((eds) => eds.filter((e) => e.id !== edge.id));
+      store.deleteEdge(edge.id);
+      setDbEdges((prev) => prev.filter((e) => e.id !== edge.id));
       return;
     }
     const pct = parseFloat(action);
@@ -225,98 +188,49 @@ export function OwnershipGraph({
       alert("Percentage must be a number between 0 and 100.");
       return;
     }
-    const r = await updateEdge(edge.id, { percentage: pct });
-    if (r.error) return alert(r.error);
-    setEdges((eds) =>
-      eds.map((e) => (e.id === edge.id ? { ...e, label: `${pct}%` } : e)),
-    );
+    store.updateEdge(edge.id, { percentage: pct });
+    setDbEdges((prev) => prev.map((e) => (e.id === edge.id ? { ...e, percentage: pct } : e)));
   }
 
-  async function handleAdd() {
-    const name = "New box";
+  // Center the viewport on a graph point, shifted right by half the pane width
+  // so the focused node sits in the visible area to the left of the pane.
+  const focusPoint = useCallback((x: number, y: number) => {
+    const inst = rfRef.current;
+    if (!inst) return;
+    const zoom = inst.getZoom();
+    inst.setCenter(x + PANE_WIDTH / 2 / zoom, y, { zoom, duration: 400 });
+  }, []);
+
+  function handleAdd() {
     const x = 100 + Math.random() * 400;
     const y = 100 + Math.random() * 200;
-    const result = await addEntity({ name, position_x: x, position_y: y });
-    if (result.error || !result.id) {
-      alert(result.error ?? "Failed to add");
-      return;
-    }
-    const newEntity: DbEntity = {
-      id: result.id,
-      name,
-      category: null,
-      subcategory: null,
-      email: null,
-      notes: null,
-      color: null,
-      links: [],
-      position_x: x,
-      position_y: y,
-    };
-    setEntities((prev) => [...prev, newEntity]);
-    setEditingEntityId(result.id);
+    const entity = store.addEntity({ name: "New box", position_x: x, position_y: y });
+    setEntities((prev) => [...prev, entity]);
+    setEditingEntityId(entity.id);
   }
 
-  // Create a new box already connected as a child (100% ownership by default —
-  // click the edge to change it) and switch the pane to it.
+  // Create a new box already connected as a child (100% by default — click the
+  // edge to change it) and switch the pane to it.
   const handleAddChild = useCallback(
-    async (parentId: string) => {
+    (parentId: string) => {
       const parent = entities.find((e) => e.id === parentId);
-      // Fan multiple children out horizontally so they don't stack on top of
-      // each other; place them a row below the parent.
-      const siblingCount = edges.filter((e) => e.source === parentId).length;
+      const siblingCount = dbEdges.filter((e) => e.parent_id === parentId).length;
       const x = (parent?.position_x ?? 100) + siblingCount * 80;
       const y = (parent?.position_y ?? 100) + 170;
 
-      const res = await addEntity({ name: "New box", position_x: x, position_y: y });
-      if (res.error || !res.id) {
-        alert(res.error ?? "Failed to add child");
-        return;
-      }
-      const childId = res.id;
-      const child: DbEntity = {
-        id: childId,
-        name: "New box",
-        category: null,
-        subcategory: null,
-        email: null,
-        notes: null,
-        color: null,
-        links: [],
-        position_x: x,
-        position_y: y,
-      };
+      const child = store.addEntity({ name: "New box", position_x: x, position_y: y });
       setEntities((prev) => [...prev, child]);
 
-      const edgeRes = await addEdgeAction({
-        parent_id: parentId,
-        child_id: childId,
-        percentage: 100,
-      });
-      if (edgeRes.error || !edgeRes.id) {
-        alert(edgeRes.error ?? "Created the box but couldn't connect it.");
+      const res = store.addEdge({ parent_id: parentId, child_id: child.id, percentage: 100 });
+      if (!res.ok) {
+        alert(res.error);
       } else {
-        setEdges((eds) =>
-          rfAddEdge(
-            {
-              id: edgeRes.id!,
-              source: parentId,
-              target: childId,
-              label: "100%",
-              labelStyle: { fontWeight: 600, fontSize: 12, fill: "#374151" },
-              labelBgStyle: { fill: "#ffffff" },
-              labelBgPadding: [4, 2],
-              labelBgBorderRadius: 4,
-              style: { stroke: "#6b7280", strokeWidth: 2 },
-            },
-            eds,
-          ),
-        );
+        setDbEdges((prev) => [...prev, res.edge]);
       }
-      setEditingEntityId(childId);
+      setEditingEntityId(child.id);
       focusPoint(x, y);
     },
-    [entities, edges, focusPoint],
+    [entities, dbEdges, focusPoint],
   );
 
   function handleEntityUpdated(updated: DbEntity) {
@@ -325,7 +239,7 @@ export function OwnershipGraph({
 
   function handleEntityDeleted(id: string) {
     setEntities((prev) => prev.filter((e) => e.id !== id));
-    setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id));
+    setDbEdges((prev) => prev.filter((e) => e.parent_id !== id && e.child_id !== id));
   }
 
   const editingEntity = editingEntityId

@@ -1,52 +1,52 @@
 # Owner Vis
 
-A standalone Next.js + React Flow app for visualizing an ownership structure as
-a graph. Add people and entities, drag from one to another to define a
-percentage, and the graph computes inbound totals so you can spot incomplete
-ownership (e.g. "this LLC only has 65% accounted for").
+A Next.js + React Flow app for visualizing ownership, IP, and products as a
+graph. Add boxes for people, entities, products, and IP; give each one a parent
+label, a sub label, a color, and up to 4 links; then drag from one box to
+another to define ownership percentages. The graph computes inbound totals so
+you can spot incomplete ownership (e.g. "this LLC only has 65% accounted for").
 
-Single-user, local-only. Data is stored in a **local SQLite file** — no
-accounts, no cloud, no API keys. Just clone and run.
+**No backend, no accounts, no database.** Each visitor's map is saved in their
+own browser (`localStorage`). Send someone the link and they get their own
+private map to build. Clearing the browser's site data resets it.
 
-## Setup
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. You'll be redirected to `/ownership`.
+Open <http://localhost:3000> — you'll be redirected to `/ownership`.
 
-That's it. On first run the app creates a SQLite database at
-`data/owner-vis.db` automatically. The `data/` folder is gitignored, so your
-ownership data stays on your machine and is never committed.
+## Deploy
 
-> Requires Node.js 18+ (tested on Node 20). `npm install` compiles
-> `better-sqlite3`, a native module — if you're on an unusual platform and the
-> install fails, make sure you have build tools (`xcode-select --install` on
-> macOS, `build-essential` on Linux).
+It's a static client app, so it deploys anywhere that hosts Next.js. On
+[Vercel](https://vercel.com): import the repo and deploy — there are no
+environment variables to set.
 
 ## Using it
 
-- **+ Person** / **+ Entity** — add a node. The node opens immediately for editing so you can name it and (for people) add an email.
-- **Drag** from the bottom of one node to the top of another — creates an ownership edge. You'll be prompted for a percentage.
-- **Click** a node to edit its name, type, or email.
-- **Click** an edge to edit the percentage, or type "delete" to remove it.
-- **Drag** nodes around to lay the graph out; positions auto-save (debounced).
+- **+ Add box** — adds a box and opens the side pane to edit it.
+- **Side pane** — set the name, a **parent label** (e.g. Owner / Product / IP),
+  a **sub** label, a **color**, an email, notes, and up to **4 links**.
+- **+ Add child (connected below)** — creates a new box already connected to the
+  current one at 100% and opens it, so you can build a tree quickly.
+- **Drag** from the bottom of one box to the top of another — creates an
+  ownership edge (you'll be prompted for a percentage).
+- **Click** an edge to edit its percentage, or type "delete" to remove it.
+- **Drag** boxes to lay out the graph; positions are saved automatically.
 
-Node colors:
-- White card = individual
-- Blue-tinted card = company / entity
-- Percentage in **amber** = inbound total is less than 100% (incomplete)
-- Percentage in **red** = inbound total exceeds 100% (over)
+Percentage colors on a box:
+- **amber** = inbound total is less than 100% (incomplete)
+- **red** = inbound total exceeds 100% (over)
 
 ## Your data
 
-- Everything lives in `data/owner-vis.db` (plus `-wal`/`-shm` sidecar files).
-- To **back up** or **move** your graph to another machine, copy the `data/`
-  folder.
-- To **start fresh**, delete `data/owner-vis.db*` — the app recreates an empty
-  database on next launch.
+- Everything is stored in your browser under the `owner-vis.*` localStorage keys.
+- It's per-browser and per-device — it does not sync across devices, and other
+  visitors to the same URL have their own separate maps.
+- To start fresh, clear this site's data in your browser.
 
 ## File map
 
@@ -56,29 +56,16 @@ src/app/
   layout.tsx                  root layout, metadata
   globals.css                 light-mode CSS forcing
   ownership/
-    page.tsx                  server component, loads entities + edges from SQLite
-    OwnershipGraph.tsx        client component, React Flow canvas
+    page.tsx                  renders the graph
+    OwnershipGraph.tsx        React Flow canvas + state
     OwnershipNode.tsx         custom node renderer
-    EntityEditModal.tsx       node-edit modal
-    actions.ts                server actions: CRUD on entities + edges
-src/lib/
-  db.ts                       SQLite connection + schema (auto-created)
+    EntityDetailsPane.tsx     right-hand details/edit pane
+    store.ts                  localStorage data layer
+    types.ts                  shared types
 ```
-
-## Embedding it elsewhere
-
-If you want to pull the visualizer into another app:
-1. Copy `src/app/ownership/*` (all five files).
-2. Copy `src/lib/db.ts` (or replace with your own data adapter).
-3. Install peer deps: `@xyflow/react`, `better-sqlite3`.
-
-The component pair (`OwnershipGraph` + `OwnershipNode` + `EntityEditModal`)
-is the visualizer. `actions.ts` is the data layer — swap it for any other
-backend (Postgres, Prisma, raw fetch) by keeping the same function shapes.
 
 ## Next steps to consider
 
-- Add auth + per-user filtering if you ever host this for more than one person.
-- Add an export to PDF / SVG.
-- Add validation (warn if outbound percentages from a parent exceed 100%).
-```
+- Export / import a map as JSON (so a map can be shared or backed up).
+- Export to PDF / SVG.
+- Validation (warn if outbound percentages from a parent exceed 100%).
